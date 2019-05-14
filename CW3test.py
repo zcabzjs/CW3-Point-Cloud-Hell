@@ -9,36 +9,34 @@
 #Imports
 from open3d import read_point_cloud as readPointCloud, write_point_cloud as writePointCloud, draw_geometries as draw, PointCloud, Vector3dVector, evaluate_registration
 from sklearn.neighbors import NearestNeighbors as NN
+from sklearn.decomposition import PCA as principle_component_analysis
 from matplotlib.pyplot import imshow
 from PIL import Image
 import numpy as np
 import copy
-import math
+import math 
 import random
 import sys
-from sklearn.decomposition import PCA
 
 
-#Preprocess
+#Preprocess 
 def preprocess():
-    ###############################################
+    ###############################################   
     #The size of the filled accumulator (i.e. MxM)
     global size_M
     size_M = 33
-    #Confidence level, a value ]0,1[
-    global confidence_interval
+    #Confidence level, a value ]0,1[  
+    global confidence_interval 
     confidence_interval = 0.95
     #Max distance between true and measured distribution (the lower the better), a value ]0,1[
     global epsilon
-    #0.073
-    epsilon = 0.9
-    #number of neighbours
+    epsilon = 0.073
+    #number of neighbours 
     global neighbourhood_size
-    #100
-    neighbourhood_size = 10
-    ###############################################
+    neighbourhood_size = 100  
+    ###############################################   
     #Read in data
-    print("Preprocessing...")
+    print("Preprocessing...")    
     #Mesh to work on
     global Mesh
     #Load Mesh
@@ -48,6 +46,7 @@ def preprocess():
     #Mesh = trimesh.load("example_meshes/camel.obj")
     #Cow
     #Mesh = trimesh.load("example_meshes/cow.obj")
+
 
 
 #Convert Open3d Point Cloud to Numpy Array
@@ -68,6 +67,16 @@ def normalize(this_n):
     normalized_n = this_n/np.linalg.norm(this_n)
     return normalized_n
 
+#PCA on the 3D mesh
+def pca_3d(this_pointArray, this_neighbourhood):
+    #Rotate the mesh accordin to PCA such that 
+    #the rotation aligns the z-axis on the smallest eigenvector
+    pca = principle_component_analysis(3)
+    pca.fit(this_neighbourhood)
+    pca_covariance_matrix = pca.get_covariance()
+    transformed_mesh_pointArray = this_pointArray.dot(pca_covariance_matrix)
+    return transformed_mesh_pointArray
+
 #Methods/Functions
 def hough_transform(this_mesh):
     #Convert into narray
@@ -75,7 +84,7 @@ def hough_transform(this_mesh):
     numberOfPoints = len(Mesh_pointArray)
     #Produce PointCloud
     Mesh_pointCloud = Vector3dVector(Mesh_pointArray)
-    #compute NN for this mesh
+    #compute NN for this mesh 
     #We search for more than 3 neighbours because it generates more triplets
     nn_Mesh = NN(n_neighbors=neighbourhood_size, algorithm='kd_tree').fit(Mesh_pointCloud)
     distances, indices = nn_Mesh.kneighbors(Mesh_pointCloud)
@@ -84,30 +93,21 @@ def hough_transform(this_mesh):
     #Make 3D matrix
     accumulator = np.zeros((numberOfPoints, size_M, size_M))
     #search the point cloud
-    for this_point in range(2):
-        #store
+    for this_point in range(len(indices)):
+        #store   
         triplets = []
         #for numberOfTriplets to be made
-        for this_triplet in range(int(numberOfTriplets)):
+        for this_triplet in range(numberOfTriplets):
             #obtain 3 random neighbours
             triplet = random.sample(list(indices[this_point]), 3)
             #add to triplets
             triplets.append(triplet)
-        #For each triplet, calculate the normal of the plane that they span
-
         #calculate PCA
         neighbourhoodPoints = []
         for neighbours in indices[int(this_point)]:
             neighbourhoodPoints.append(list(Mesh_pointCloud[neighbours]))
-
-        print(neighbourhoodPoints)
-
-        pca = PCA(3)
-        pca.fit(neighbourhoodPoints)
-        pcaCovarianceMatrix = pca.get_covariance()
-        print(pcaCovarianceMatrix)
-
-        transformed_mesh_pointArray = Mesh_pointArray.dot(pcaCovarianceMatrix)
+        transformed_mesh_pointArray = pca_3d(Mesh_pointArray, neighbourhoodPoints)
+        #For each triplet, calculate the normal of the plane that they span 
         normals = []
         for this_triplet in range(len(triplets)):
             #obtain points
@@ -121,26 +121,26 @@ def hough_transform(this_mesh):
             #if (np.dot(p1, n) > 0):
                 #n = -n
             normals.append(list(n))
-        #for this point in the accumulator
+        #for this point in the accumulator 
         for this_normal in range(len(normals)):
-            #Compute x and y components for the accumulator
+            #Compute x and y components for the accumulator 
             x_comp = math.floor(((normals[this_normal][0] + 1)/2) * size_M)
             y_comp = math.floor(((normals[this_normal][1] + 1)/2) * size_M)
             #add vote
             accumulator[int(this_point)][int(x_comp)][int(y_comp)] = accumulator[int(this_point)][int(x_comp)][int(y_comp)] + 1
-        #print(accumulator[this_point])
+	    #print(accumulator[this_point])
         #max_inten = np.amax(accumulator[this_point])
         #img = Image.fromarray(accumulator[this_point] * (255/max_inten))
         #imshow(img)
-        #sjbvhsdlkh
+        #sjbvhsdlkh 
     return accumulator
 
 #Main
 def main():
     #Set up
     random.seed(0)
-    np.set_printoptions(threshold = sys.maxsize)
-
+    np.set_printoptions(threshold = sys.maxsize)    
+    #Proprocess
     preprocess()
     # Create copies of meshs
     Mesh_copy = copy.deepcopy(Mesh)
@@ -150,7 +150,10 @@ def main():
     #draw
     print("Initial positions")
     #draw([Mesh_copy])
-    #STEP 1, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
+    #STEP 1, PCA in 3D space
+    #Mesh_copy = pca_3d(Mesh_copy)
+    #adkvnalv
+    #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     accumulator_filled = hough_transform(Mesh_copy)
     #
     print(accumulator_filled[0])
@@ -158,6 +161,10 @@ def main():
     img = Image.fromarray(accumulator_filled[0] * (255/max_inten))
     imshow(img)
 
+
+
+
 #Begins the program by running Main method
 if __name__ == '__main__':
     main()
+
