@@ -2,6 +2,7 @@ import numpy as np
 import math
 import copy
 from open3d import read_point_cloud as readPointCloud, write_point_cloud as writePointCloud, draw_geometries as draw, PointCloud, Vector3dVector, evaluate_registration, draw_geometries
+from sklearn.neighbors import NearestNeighbors as NN
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -29,6 +30,30 @@ def normalise_array(array):
         array[index] = normalise(array[index])
     return array
 
+def generate_triplets(pointCloud, index, indices):
+    triplets = []
+    number_of_triplets = Math.ceil(1. / (2 * epsilon**2) * math.log(2*size/(1. - confidence_interval)))
+    # need to use nanoflann kd-tree
+    # from the nearest points, select 3 random points from these to form generate_triplets
+    for i in xrange(number_of_triplets):
+
+    return triplets
+
+def adjust_settings():
+    global size
+    size = 33
+    global confidence_interval
+    confidence_interval = 0.95
+    global epsilon
+    epsilon = 1.
+    global neighboursize
+    neighboursize = 15
+
+def generate_kdtree(pointCloud):
+    nn = NN(n_neighbors=neighboursize, algorithm='kd_tree').fit(pointCloud)
+    distances, indices = nn.kneighbors(pointCloud)
+    return distances, indices
+
 #Define the main method
 def main():
     #Set up
@@ -43,7 +68,7 @@ def main():
     V = M1_pointCloud[0]
     print(M1_pointArray)
 
-    print(np.linalg.norm(M1_pointArray[0]))
+    print(len(M1_pointCloud))
     print(normalise_array(M1_pointArray))
 
 
