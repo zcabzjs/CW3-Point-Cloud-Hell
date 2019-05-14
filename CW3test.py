@@ -14,29 +14,29 @@ from matplotlib.pyplot import imshow
 from PIL import Image
 import numpy as np
 import copy
-import math 
+import math
 import random
 import sys
 
 
-#Preprocess 
+#Preprocess
 def preprocess():
-    ###############################################   
+    ###############################################
     #The size of the filled accumulator (i.e. MxM)
     global size_M
     size_M = 33
-    #Confidence level, a value ]0,1[  
-    global confidence_interval 
+    #Confidence level, a value ]0,1[
+    global confidence_interval
     confidence_interval = 0.95
     #Max distance between true and measured distribution (the lower the better), a value ]0,1[
     global epsilon
     epsilon = 0.073
-    #number of neighbours 
+    #number of neighbours
     global neighbourhood_size
-    neighbourhood_size = 100  
-    ###############################################   
+    neighbourhood_size = 100
+    ###############################################
     #Read in data
-    print("Preprocessing...")    
+    print("Preprocessing...")
     #Mesh to work on
     global Mesh
     #Load Mesh
@@ -68,14 +68,20 @@ def normalize(this_n):
     return normalized_n
 
 #PCA on the 3D mesh
-def pca_3d(this_pointArray, this_neighbourhood):
-    #Rotate the mesh accordin to PCA such that 
+def pca_3d_covariance_matrix(this_neighbourhood):
+    #Rotate the mesh accordin to PCA such that
     #the rotation aligns the z-axis on the smallest eigenvector
-    pca = principle_component_analysis(3)
-    pca.fit(this_neighbourhood)
-    pca_covariance_matrix = pca.get_covariance()
-    transformed_mesh_pointArray = this_pointArray.dot(pca_covariance_matrix)
-    return transformed_mesh_pointArray
+    pca3d = principle_component_analysis(3)
+    pca3d.fit(this_neighbourhood)
+    pca3d_covariance_matrix = pca3d.get_covariance()
+    return pca3d_covariance_matrix
+
+#PCA on the normal before accumulation
+def pca_2d_covariance_matrix(this_neighbourhood):
+    pca2d = principle_component_analysis(2)
+    pca2d.fit(this_neighbourhood)
+    pca2d_covariance_matrix = pca2d.get_covariance()
+    return pca2d_covariance_matrix
 
 #Methods/Functions
 def hough_transform(this_mesh):
@@ -84,7 +90,7 @@ def hough_transform(this_mesh):
     numberOfPoints = len(Mesh_pointArray)
     #Produce PointCloud
     Mesh_pointCloud = Vector3dVector(Mesh_pointArray)
-    #compute NN for this mesh 
+    #compute NN for this mesh
     #We search for more than 3 neighbours because it generates more triplets
     nn_Mesh = NN(n_neighbors=neighbourhood_size, algorithm='kd_tree').fit(Mesh_pointCloud)
     distances, indices = nn_Mesh.kneighbors(Mesh_pointCloud)
@@ -94,10 +100,10 @@ def hough_transform(this_mesh):
     accumulator = np.zeros((numberOfPoints, size_M, size_M))
     #search the point cloud
     for this_point in range(len(indices)):
-        #store   
+        #store
         triplets = []
         #for numberOfTriplets to be made
-        for this_triplet in range(numberOfTriplets):
+        for this_triplet in range(int(numberOfTriplets)):
             #obtain 3 random neighbours
             triplet = random.sample(list(indices[this_point]), 3)
             #add to triplets
@@ -106,9 +112,12 @@ def hough_transform(this_mesh):
         neighbourhoodPoints = []
         for neighbours in indices[int(this_point)]:
             neighbourhoodPoints.append(list(Mesh_pointCloud[neighbours]))
-        transformed_mesh_pointArray = pca_3d(Mesh_pointArray, neighbourhoodPoints)
-        #For each triplet, calculate the normal of the plane that they span 
+        pca3d_covariance_matrix = pca_3d_covariance_matrix(neighbourhoodPoints)
+        pca2d_covariance_matrix = pca_2d_covariance_matrix(neighbourhoodPoints)
+        transformed_mesh_pointArray = Mesh_pointArray.dot(pca3d_covariance_matrix)
+        #For each triplet, calculate the normal of the plane that they span
         normals = []
+
         for this_triplet in range(len(triplets)):
             #obtain points
             p1 = transformed_mesh_pointArray[triplets[this_triplet][0]]
@@ -117,13 +126,14 @@ def hough_transform(this_mesh):
             v1 = p2 - p1
             v2 = p3 - p1
             n = np.cross(v1, v2)
-            n = normalize(n)
+            #n = normalize(n)
             #if (np.dot(p1, n) > 0):
                 #n = -n
-            normals.append(list(n))
-        #for this point in the accumulator 
+            transformed_normal = n.dot(pca2d_covariance_matrix)
+            normals.append(list(normalize(transformed_normal)))
+        #for this point in the accumulator
         for this_normal in range(len(normals)):
-            #Compute x and y components for the accumulator 
+            #Compute x and y components for the accumulator
             x_comp = math.floor(((normals[this_normal][0] + 1)/2) * size_M)
             y_comp = math.floor(((normals[this_normal][1] + 1)/2) * size_M)
             #add vote
@@ -132,14 +142,14 @@ def hough_transform(this_mesh):
         #max_inten = np.amax(accumulator[this_point])
         #img = Image.fromarray(accumulator[this_point] * (255/max_inten))
         #imshow(img)
-        #sjbvhsdlkh 
+        #sjbvhsdlkh
     return accumulator
 
 #Main
 def main():
     #Set up
     random.seed(0)
-    np.set_printoptions(threshold = sys.maxsize)    
+    np.set_printoptions(threshold = sys.maxsize)
     #Proprocess
     preprocess()
     # Create copies of meshs
@@ -167,4 +177,3 @@ def main():
 #Begins the program by running Main method
 if __name__ == '__main__':
     main()
-
