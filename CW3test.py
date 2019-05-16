@@ -18,7 +18,6 @@ import math
 import random
 import sys
 
-
 #Preprocess
 def preprocess():
     ###############################################
@@ -46,8 +45,11 @@ def preprocess():
     #Mesh = trimesh.load("example_meshes/camel.obj")
     #Cow
     #Mesh = trimesh.load("example_meshes/cow.obj")
-
-
+    ###############################################
+    #training set (dragon)
+    global training_vertex_normals
+    Mesh_training = readPointCloud("dragon.ply")
+    training_vertex_normals = Mesh_training.normals
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -117,7 +119,6 @@ def hough_transform(this_mesh):
         transformed_mesh_pointArray = Mesh_pointArray.dot(pca3d_covariance_matrix)
         #For each triplet, calculate the normal of the plane that they span
         normals = []
-
         for this_triplet in range(len(triplets)):
             #obtain points
             p1 = transformed_mesh_pointArray[triplets[this_triplet][0]]
@@ -126,9 +127,9 @@ def hough_transform(this_mesh):
             v1 = p2 - p1
             v2 = p3 - p1
             n = np.cross(v1, v2)
-            #n = normalize(n)
-            #if (np.dot(p1, n) > 0):
-                #n = -n
+            n = normalize(n)
+            if (np.dot(p1, n) > 0):
+                n = -n
             transformed_normal = n.dot(pca2d_covariance_matrix)
             normals.append(list(normalize(transformed_normal)))
         #for this point in the accumulator
@@ -138,11 +139,6 @@ def hough_transform(this_mesh):
             y_comp = math.floor(((normals[this_normal][1] + 1)/2) * size_M)
             #add vote
             accumulator[int(this_point)][int(x_comp)][int(y_comp)] = accumulator[int(this_point)][int(x_comp)][int(y_comp)] + 1
-	    #print(accumulator[this_point])
-        #max_inten = np.amax(accumulator[this_point])
-        #img = Image.fromarray(accumulator[this_point] * (255/max_inten))
-        #imshow(img)
-        #sjbvhsdlkh
     return accumulator
 
 #Main
@@ -159,7 +155,8 @@ def main():
     Mesh_copy.paint_uniform_color([192/255, 192/255, 192/255]) #Grey
     #draw
     print("Initial positions")
-    #draw([Mesh_copy])
+    draw([Mesh_copy])
+    sdjvnsd
     #STEP 1, PCA in 3D space
     #Mesh_copy = pca_3d(Mesh_copy)
     #adkvnalv
@@ -170,9 +167,7 @@ def main():
     max_inten = np.amax(accumulator_filled[0])
     img = Image.fromarray(accumulator_filled[0] * (255/max_inten))
     imshow(img)
-
-
-
+    
 
 #Begins the program by running Main method
 if __name__ == '__main__':
