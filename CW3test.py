@@ -18,6 +18,7 @@ import math
 import random
 import sys
 
+
 #Preprocess
 def preprocess():
     ###############################################
@@ -45,11 +46,8 @@ def preprocess():
     #Mesh = trimesh.load("example_meshes/camel.obj")
     #Cow
     #Mesh = trimesh.load("example_meshes/cow.obj")
-    ###############################################
-    #training set (dragon)
-    global training_vertex_normals
-    Mesh_training = readPointCloud("dragon.ply")
-    training_vertex_normals = Mesh_training.normals
+    training_vertex_normals = Mesh.normals
+
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -70,20 +68,20 @@ def normalize(this_n):
     return normalized_n
 
 #PCA on the 3D mesh
-def pca_3d_covariance_matrix(this_neighbourhood):
-    #Rotate the mesh accordin to PCA such that
-    #the rotation aligns the z-axis on the smallest eigenvector
-    pca3d = principle_component_analysis(3)
-    pca3d.fit(this_neighbourhood)
-    pca3d_covariance_matrix = pca3d.get_covariance()
-    return pca3d_covariance_matrix
+#def pca_3d_covariance_matrix(this_neighbourhood):
+#    #Rotate the mesh accordin to PCA such that
+#    #the rotation aligns the z-axis on the smallest eigenvector
+#    pca3d = principle_component_analysis(3)
+#    pca3d.fit(this_neighbourhood)
+#    pca3d_covariance_matrix = pca3d.get_covariance()
+#    return pca3d_covariance_matrix
 
 #PCA on the normal before accumulation
-def pca_2d_covariance_matrix(this_neighbourhood):
-    pca2d = principle_component_analysis(2)
-    pca2d.fit(this_neighbourhood)
-    pca2d_covariance_matrix = pca2d.get_covariance()
-    return pca2d_covariance_matrix
+#def pca_2d_covariance_matrix(this_neighbourhood):
+#    pca2d = principle_component_analysis(2)
+#    pca2d.fit(this_neighbourhood)
+#    pca2d_covariance_matrix = pca2d.get_covariance()
+#    return pca2d_covariance_matrix
 
 #Methods/Functions
 def hough_transform(this_mesh):
@@ -100,10 +98,15 @@ def hough_transform(this_mesh):
     numberOfTriplets = math.ceil((1/(2*(epsilon**2)))*math.log((2*size_M*size_M)/(1-confidence_interval)))
     #Make 3D matrix
     accumulator = np.zeros((numberOfPoints, size_M, size_M))
+    vote_normals = np.zeros((numberOfPoints, 3))    
     #search the point cloud
     for this_point in range(len(indices)):
         #store
         triplets = []
+        vote_normal_accumulator = np.zeros((size_M, size_M, 3))
+        max_vote_number = 0
+        x_comp_ofmax = 0
+        y_comp_ofmax = 0
         #for numberOfTriplets to be made
         for this_triplet in range(int(numberOfTriplets)):
             #obtain 3 random neighbours
@@ -114,9 +117,12 @@ def hough_transform(this_mesh):
         neighbourhoodPoints = []
         for neighbours in indices[int(this_point)]:
             neighbourhoodPoints.append(list(Mesh_pointCloud[neighbours]))
-        pca3d_covariance_matrix = pca_3d_covariance_matrix(neighbourhoodPoints)
-        pca2d_covariance_matrix = pca_2d_covariance_matrix(neighbourhoodPoints)
-        transformed_mesh_pointArray = Mesh_pointArray.dot(pca3d_covariance_matrix)
+        #pca3d_covariance_matrix = pca_3d_covariance_matrix(neighbourhoodPoints)
+        #pca2d_covariance_matrix = pca_2d_covariance_matrix(neighbourhoodPoints)
+        #transformed_mesh_pointArray = Mesh_pointArray.dot(pca3d_covariance_matrix)
+        ###################
+        transformed_mesh_pointArray = Mesh_pointArray
+        ###################
         #For each triplet, calculate the normal of the plane that they span
         normals = []
         for this_triplet in range(len(triplets)):
@@ -128,17 +134,32 @@ def hough_transform(this_mesh):
             v2 = p3 - p1
             n = np.cross(v1, v2)
             n = normalize(n)
-            if (np.dot(p1, n) > 0):
-                n = -n
-            transformed_normal = n.dot(pca2d_covariance_matrix)
-            normals.append(list(normalize(transformed_normal)))
+            #if (np.dot(p1, n) > 0):
+                #n = -n
+            #transformed_normal = n.dot(pca2d_covariance_matrix)
+            normals.append(list(n))
         #for this point in the accumulator
         for this_normal in range(len(normals)):
             #Compute x and y components for the accumulator
             x_comp = math.floor(((normals[this_normal][0] + 1)/2) * size_M)
             y_comp = math.floor(((normals[this_normal][1] + 1)/2) * size_M)
+            #For the h case where x or y comp = 1
+            if (normals[this_normal][0] >= 1):
+                print(normals[this_normal])
+                x_comp = size_M - 1
+            if (normals[this_normal][1] >= 1):
+                print(normals[this_normal])
+                y_comp = size_M - 1
             #add vote
             accumulator[int(this_point)][int(x_comp)][int(y_comp)] = accumulator[int(this_point)][int(x_comp)][int(y_comp)] + 1
+            #add normals 
+            vote_normal_accumulator[int(x_comp)][int(y_comp)] += normals[this_normal]
+            if(accumulator[int(this_point)][int(x_comp)][int(y_comp)] > max_vote_number):
+                max_vote_number = accumulator[int(this_point)][int(x_comp)][int(y_comp)]
+                x_comp_ofmax = x_comp
+                y_comp_ofmax = y_comp
+        mean_normal = vote_normal_accumulator[int(x_comp_ofmax)][int(y_comp_ofmax)]/accumulator[int(this_point)][int(x_comp_ofmax)][int(y_comp_ofmax)]
+        vote_normals[int(this_point)] = mean_normal
     return accumulator
 
 #Main
@@ -147,7 +168,7 @@ def main():
     random.seed(0)
     np.set_printoptions(threshold = sys.maxsize)
     #Proprocess
-    preprocess()
+    preprocess()    
     # Create copies of meshs
     Mesh_copy = copy.deepcopy(Mesh)
     # Colour in meshes
@@ -155,8 +176,7 @@ def main():
     Mesh_copy.paint_uniform_color([192/255, 192/255, 192/255]) #Grey
     #draw
     print("Initial positions")
-    draw([Mesh_copy])
-    sdjvnsd
+    #draw([Mesh_copy])
     #STEP 1, PCA in 3D space
     #Mesh_copy = pca_3d(Mesh_copy)
     #adkvnalv
@@ -165,7 +185,9 @@ def main():
     #
     print(accumulator_filled[0])
     max_inten = np.amax(accumulator_filled[0])
-    img = Image.fromarray(accumulator_filled[0] * (255/max_inten))
+    x = accumulator_filled[0] * (255/max_inten)
+    x = np.abs(x - 255)
+    img = Image.fromarray(x)
     imshow(img)
     
 
