@@ -33,7 +33,7 @@ def preprocess():
     epsilon = 0.073
     #number of neighbours
     global neighbourhood_size
-    neighbourhood_size = 100
+    neighbourhood_size = 32
     ###############################################
     #Read in data
     print("Preprocessing...")
@@ -168,7 +168,7 @@ def main():
     random.seed(0)
     np.set_printoptions(threshold = sys.maxsize)
     #Proprocess
-    preprocess()    
+    preprocess() 
     # Create copies of meshs
     Mesh_copy = copy.deepcopy(Mesh)
     # Colour in meshes
@@ -182,14 +182,23 @@ def main():
     #adkvnalv
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     accumulator_filled = hough_transform(Mesh_copy)
-    #
-    print(accumulator_filled[0])
-    max_inten = np.amax(accumulator_filled[0])
-    x = accumulator_filled[0] * (255/max_inten)
+    
+    the_chosen = 600
+    
+    
+    print(accumulator_filled[the_chosen])
+    max_inten = np.amax(accumulator_filled[the_chosen])
+    x = accumulator_filled[the_chosen] * (255/max_inten)
+    
     x = np.abs(x - 255)
     img = Image.fromarray(x)
-    imshow(img)
-    
+    img = img.convert('RGBA')
+    data = np.array(img)
+    red, green, blue, alpha = data.T
+    black_areas = (red == 0) & (blue == 0) & (green == 0)
+    data[..., :-1][black_areas.T] = (255, 0, 0)
+    img_red = Image.fromarray(data)
+    imshow(img_red)    
 
 #Begins the program by running Main method
 if __name__ == '__main__':
