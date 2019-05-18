@@ -10,14 +10,18 @@
 from open3d import read_point_cloud as readPointCloud, write_point_cloud as writePointCloud, draw_geometries as draw, PointCloud, Vector3dVector, evaluate_registration
 from sklearn.neighbors import NearestNeighbors as NN
 from sklearn.decomposition import PCA as principle_component_analysis
+from sklearn.model_selection import train_test_split as tts
 from matplotlib.pyplot import imshow
+import matplotlib.pylab as plt
 from PIL import Image
 import numpy as np
+import keras
+from keras.models import Sequential, load_model
+from keras.layers import Dense, Dropout, Conv2D, MaxPooling2D, Flatten
 import copy
 import math
 import random
 import sys
-
 
 #Preprocess
 def preprocess():
@@ -35,19 +39,20 @@ def preprocess():
     global neighbourhood_size
     neighbourhood_size = 32
     ###############################################
+    #(have the network train on chunks of the data rather than a whole)
+    global batch_size
+    batch_size = 20
+    #the number of iterations the network trains for
+    global epochs
+    epochs = 10
+    ###############################################
     #Read in data
     print("Preprocessing...")
     #Mesh to work on
     global Mesh
     #Load Mesh
     #Bunny:
-    Mesh = readPointCloud("bunny.ply")
-    #Camel
-    #Mesh = trimesh.load("example_meshes/camel.obj")
-    #Cow
-    #Mesh = trimesh.load("example_meshes/cow.obj")
-    training_vertex_normals = Mesh.normals
-
+    Mesh = readPointCloud("dragon.ply")
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -101,6 +106,7 @@ def hough_transform(this_mesh):
     vote_normals = np.zeros((numberOfPoints, 3))    
     #search the point cloud
     for this_point in range(len(indices)):
+        print(this_point+1)
         #store
         triplets = []
         vote_normal_accumulator = np.zeros((size_M, size_M, 3))
@@ -145,10 +151,8 @@ def hough_transform(this_mesh):
             y_comp = math.floor(((normals[this_normal][1] + 1)/2) * size_M)
             #For the h case where x or y comp = 1
             if (normals[this_normal][0] >= 1):
-                print(normals[this_normal])
                 x_comp = size_M - 1
             if (normals[this_normal][1] >= 1):
-                print(normals[this_normal])
                 y_comp = size_M - 1
             #add vote
             accumulator[int(this_point)][int(x_comp)][int(y_comp)] = accumulator[int(this_point)][int(x_comp)][int(y_comp)] + 1
@@ -161,6 +165,88 @@ def hough_transform(this_mesh):
         mean_normal = vote_normal_accumulator[int(x_comp_ofmax)][int(y_comp_ofmax)]/accumulator[int(this_point)][int(x_comp_ofmax)][int(y_comp_ofmax)]
         vote_normals[int(this_point)] = mean_normal
     return accumulator
+
+#Method for displaying an accumulator
+def display_accumulator(accumulator_set, this_accumulator, display_red):
+    #print(accumulator_set[this_accumulator])
+    max_inten = np.amax(accumulator_set[this_accumulator])
+    x = accumulator_set[this_accumulator] * (255/max_inten)
+    x = np.abs(x - 255)
+    img = Image.fromarray(x)
+    if (display_red == True): 
+       img = img.convert('RGBA')
+       data = np.array(img)
+       red, green, blue, alpha = data.T
+       black_areas = (red == 0) & (blue == 0) & (green == 0)
+       data[..., :-1][black_areas.T] = (255, 0, 0)
+       img = Image.fromarray(data)
+    return img
+
+#Method for training the model 
+def train_network(filled_accumulators, training_normals):
+    #input image dimensions
+    img_x, img_y = size_M, size_M
+    #make training set
+    #Only have n_x and n_y
+    training_normals = np.delete(training_normals, 2, 1)
+    #Split the data 
+    training_x, test_x, training_y, test_y = tts(filled_accumulators, training_normals, test_size = 0.2)
+    #print(training_x[0])
+    #print(training_y[0])
+    #print(test_x[0])
+    #print(test_y[0])
+    #Reshape data
+    training_x = training_x.reshape(training_x.shape[0], img_x, img_y, 1)
+    test_x = test_x.reshape(test_x.shape[0], img_x, img_y, 1)
+    input_shape = (img_x, img_y, 1)
+    #initialize model 
+    model = Sequential()
+    #1st layer : Conv
+    model.add(Conv2D(50, kernel_size = (3,3), activation = 'relu', input_shape = input_shape))
+    #2nd layer : Conv
+    model.add(Conv2D(50, kernel_size = (3,3), activation = 'relu'))
+    #3rd layer : MaxPool to downscale the input in both width and height
+    model.add(MaxPooling2D(pool_size = (2, 2)))
+    #DROPOUT
+    model.add(Dropout(0.1))
+    #4th layer : Conv
+    model.add(Conv2D(50, kernel_size = (3,3), activation = 'relu'))
+    #5th layer : MaxPool again
+    model.add(MaxPooling2D(pool_size = (2, 2)))
+    #6th layer : Conv
+    model.add(Conv2D(96, kernel_size = (3,3), activation = 'relu'))
+    #7th layer : Flatten to represent all data thus far on a single row of data 
+    model.add(Flatten())
+    #8th layer : Dense
+    model.add(Dense(2048, activation = 'relu', input_shape = (3456,)))
+    #DROPOUT
+    model.add(Dropout(0.1))
+    #9th layer : Dense
+    model.add(Dense(1024, activation = 'relu'))
+    #10th layer: Dense
+    model.add(Dense(512, activation = 'relu'))
+    #The final output only has 2 coordinates
+    model.add(Dense(2))
+    model.summary()
+    model.compile(loss= 'mse', optimizer = 'adam', metrics = ['mse'])
+    #   
+    history = model.fit(training_x, training_y,
+          batch_size = batch_size,
+          epochs = epochs,
+          verbose = 1,
+          validation_data = (test_x, test_y))
+    score = model.evaluate(test_x, test_y, verbose = 0)
+    print('Test loss:', score[0])
+    print('Test accuracy:', score[1])
+    model.save("accu_model.h5")
+    #predict 
+    predictions = model.predict(test_x, batch_size = batch_size)
+    for i in range(5):
+        rand = random.randint(0, 199)
+        print("Number:", i)
+        print("True: ", test_y[rand])
+        print("Prediction: ", predictions[rand])    
+    return model 
 
 #Main
 def main():
@@ -181,25 +267,28 @@ def main():
     #Mesh_copy = pca_3d(Mesh_copy)
     #adkvnalv
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
+    print("Filling accumulators...")
     accumulator_filled = hough_transform(Mesh_copy)
+    accumulator_filled.dump("accumulator_filled.dat")
+    #accumulator_filled = np.load("accumulator_filled.dat")
     
-    the_chosen = 600
     
+    #OPTIONAL display an image
+    the_chosen = 0
+    display_red = True 
+    show_this = display_accumulator(accumulator_filled, the_chosen, display_red)
+    imshow(show_this)
+    #STEP 3 Train the network
+    training_vertex_normals = Mesh_copy.normals    
+    for i in range(len(training_vertex_normals)):
+        training_vertex_normals[i] = normalize(training_vertex_normals[i])
+    #Begin training
+    print("Training network...")
+    train_network(accumulator_filled, training_vertex_normals)
+    #model = load_model("accu_model.h5")
+    #validation method
+    humanahumanunsdjlnwbkjvsdlvsbndl
     
-    print(accumulator_filled[the_chosen])
-    max_inten = np.amax(accumulator_filled[the_chosen])
-    x = accumulator_filled[the_chosen] * (255/max_inten)
-    
-    x = np.abs(x - 255)
-    img = Image.fromarray(x)
-    img = img.convert('RGBA')
-    data = np.array(img)
-    red, green, blue, alpha = data.T
-    black_areas = (red == 0) & (blue == 0) & (green == 0)
-    data[..., :-1][black_areas.T] = (255, 0, 0)
-    img_red = Image.fromarray(data)
-    imshow(img_red)    
-
 #Begins the program by running Main method
 if __name__ == '__main__':
     main()
