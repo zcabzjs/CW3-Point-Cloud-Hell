@@ -7,6 +7,7 @@
 # 2018-19
 
 #Imports
+import open3d
 from open3d import read_point_cloud as readPointCloud, write_point_cloud as writePointCloud, draw_geometries as draw, PointCloud, Vector3dVector, evaluate_registration
 from sklearn.neighbors import NearestNeighbors as NN
 from sklearn.decomposition import PCA as principle_component_analysis
@@ -37,14 +38,14 @@ def preprocess():
     epsilon = 0.073
     #number of neighbours
     global neighbourhood_size
-    neighbourhood_size = 32
+    neighbourhood_size = 100
     ###############################################
     #(have the network train on chunks of the data rather than a whole)
     global batch_size
-    batch_size = 20
+    batch_size = 128
     #the number of iterations the network trains for
     global epochs
-    epochs = 10
+    epochs = 25
     ###############################################
     #Read in data
     print("Preprocessing...")
@@ -53,6 +54,8 @@ def preprocess():
     #Load Mesh
     #Bunny:
     Mesh = readPointCloud("dragon.ply")
+    global run_PCA
+    run_PCA = True
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -72,21 +75,29 @@ def normalize(this_n):
     normalized_n = this_n/np.linalg.norm(this_n)
     return normalized_n
 
-#PCA on the 3D mesh
-#def pca_3d_covariance_matrix(this_neighbourhood):
-#    #Rotate the mesh accordin to PCA such that
-#    #the rotation aligns the z-axis on the smallest eigenvector
-#    pca3d = principle_component_analysis(3)
-#    pca3d.fit(this_neighbourhood)
-#    pca3d_covariance_matrix = pca3d.get_covariance()
-#    return pca3d_covariance_matrix
+def pca_3d_adjustment_matrix(this_neighbourhood):
+    cov = np.zeros([3,3])
+    mean = np.mean(this_neighbourhood, axis=0)
+    for neighbour in this_neighbourhood:
+        v = neighbour - mean
+        cov += np.outer(v,v)
+    u, s, vt = np.linalg.svd(cov)
+    return vt
 
-#PCA on the normal before accumulation
-#def pca_2d_covariance_matrix(this_neighbourhood):
-#    pca2d = principle_component_analysis(2)
-#    pca2d.fit(this_neighbourhood)
-#    pca2d_covariance_matrix = pca2d.get_covariance()
-#    return pca2d_covariance_matrix
+def pca_2d_adjustment_matrix(this_normals):
+    cov = np.zeros([3,3])
+    readjusted_normals = []
+    for normal in this_normals:
+        nx = ((normal[0] + 1)/2) * size_M
+        ny = ((normal[1] + 1)/2) * size_M
+        readjusted_normal = [nx,ny,0]
+        readjusted_normals.append(list(readjusted_normal))
+    mean = np.mean(readjusted_normals, axis = 0)
+    for readjusted_normal in readjusted_normals:
+        v = readjusted_normal - mean
+        cov += np.outer(v,v)
+    u, s, vt = np.linalg.svd(cov)
+    return vt
 
 #Methods/Functions
 def hough_transform(this_mesh):
@@ -103,7 +114,7 @@ def hough_transform(this_mesh):
     numberOfTriplets = math.ceil((1/(2*(epsilon**2)))*math.log((2*size_M*size_M)/(1-confidence_interval)))
     #Make 3D matrix
     accumulator = np.zeros((numberOfPoints, size_M, size_M))
-    vote_normals = np.zeros((numberOfPoints, 3))    
+    vote_normals = np.zeros((numberOfPoints, 3))
     #search the point cloud
     for this_point in range(len(indices)):
         print(this_point+1)
@@ -123,6 +134,9 @@ def hough_transform(this_mesh):
         neighbourhoodPoints = []
         for neighbours in indices[int(this_point)]:
             neighbourhoodPoints.append(list(Mesh_pointCloud[neighbours]))
+        pca_3d = np.zeros([3,3])
+        if(run_PCA):
+            pca_3d = pca_3d_adjustment_matrix(neighbourhoodPoints)
         #pca3d_covariance_matrix = pca_3d_covariance_matrix(neighbourhoodPoints)
         #pca2d_covariance_matrix = pca_2d_covariance_matrix(neighbourhoodPoints)
         #transformed_mesh_pointArray = Mesh_pointArray.dot(pca3d_covariance_matrix)
@@ -139,13 +153,27 @@ def hough_transform(this_mesh):
             v1 = p2 - p1
             v2 = p3 - p1
             n = np.cross(v1, v2)
+            if(run_PCA):
+                n = np.dot(pca_3d, n)
+            #Normalise the normal
             n = normalize(n)
-            #if (np.dot(p1, n) > 0):
-                #n = -n
-            #transformed_normal = n.dot(pca2d_covariance_matrix)
+            #Reorientate the normal
+            referencePoint = [0,0,1]
+            if (np.dot(referencePoint, n) < 0):
+                n *= -1
             normals.append(list(n))
-        #for this point in the accumulator
+        pca_2d = np.zeros([3,3])
+        if(run_PCA):
+            pca_2d = pca_2d_adjustment_matrix(normals)
         for this_normal in range(len(normals)):
+            if(run_PCA):
+                normals[this_normal] = np.dot(pca_2d, normals[this_normal])
+            #Normalise the normal
+            normals[this_normal] = normalize(normals[this_normal])
+            #Reorientate the normal
+            referencePoint = [0,0,1]
+            if (np.dot(referencePoint, normals[this_normal]) < 0):
+                normals[this_normal] *= -1
             #Compute x and y components for the accumulator
             x_comp = math.floor(((normals[this_normal][0] + 1)/2) * size_M)
             y_comp = math.floor(((normals[this_normal][1] + 1)/2) * size_M)
@@ -155,8 +183,8 @@ def hough_transform(this_mesh):
             if (normals[this_normal][1] >= 1):
                 y_comp = size_M - 1
             #add vote
-            accumulator[int(this_point)][int(x_comp)][int(y_comp)] = accumulator[int(this_point)][int(x_comp)][int(y_comp)] + 1
-            #add normals 
+            accumulator[int(this_point)][int(x_comp)][int(y_comp)] += 1
+            #add normals
             vote_normal_accumulator[int(x_comp)][int(y_comp)] += normals[this_normal]
             if(accumulator[int(this_point)][int(x_comp)][int(y_comp)] > max_vote_number):
                 max_vote_number = accumulator[int(this_point)][int(x_comp)][int(y_comp)]
@@ -173,7 +201,7 @@ def display_accumulator(accumulator_set, this_accumulator, display_red):
     x = accumulator_set[this_accumulator] * (255/max_inten)
     x = np.abs(x - 255)
     img = Image.fromarray(x)
-    if (display_red == True): 
+    if (display_red == True):
        img = img.convert('RGBA')
        data = np.array(img)
        red, green, blue, alpha = data.T
@@ -182,14 +210,14 @@ def display_accumulator(accumulator_set, this_accumulator, display_red):
        img = Image.fromarray(data)
     return img
 
-#Method for training the model 
+#Method for training the model
 def train_network(filled_accumulators, training_normals):
     #input image dimensions
     img_x, img_y = size_M, size_M
     #make training set
     #Only have n_x and n_y
     training_normals = np.delete(training_normals, 2, 1)
-    #Split the data 
+    #Split the data
     training_x, test_x, training_y, test_y = tts(filled_accumulators, training_normals, test_size = 0.2)
     #print(training_x[0])
     #print(training_y[0])
@@ -199,7 +227,7 @@ def train_network(filled_accumulators, training_normals):
     training_x = training_x.reshape(training_x.shape[0], img_x, img_y, 1)
     test_x = test_x.reshape(test_x.shape[0], img_x, img_y, 1)
     input_shape = (img_x, img_y, 1)
-    #initialize model 
+    #initialize model
     model = Sequential()
     #1st layer : Conv
     model.add(Conv2D(50, kernel_size = (3,3), activation = 'relu', input_shape = input_shape))
@@ -207,29 +235,31 @@ def train_network(filled_accumulators, training_normals):
     model.add(Conv2D(50, kernel_size = (3,3), activation = 'relu'))
     #3rd layer : MaxPool to downscale the input in both width and height
     model.add(MaxPooling2D(pool_size = (2, 2)))
-    #DROPOUT
-    model.add(Dropout(0.1))
     #4th layer : Conv
     model.add(Conv2D(50, kernel_size = (3,3), activation = 'relu'))
     #5th layer : MaxPool again
     model.add(MaxPooling2D(pool_size = (2, 2)))
     #6th layer : Conv
     model.add(Conv2D(96, kernel_size = (3,3), activation = 'relu'))
-    #7th layer : Flatten to represent all data thus far on a single row of data 
+    #7th layer : Flatten to represent all data thus far on a single row of data
     model.add(Flatten())
+    #DROPOUT
+    model.add(Dropout(0.5))
     #8th layer : Dense
     model.add(Dense(2048, activation = 'relu', input_shape = (3456,)))
     #DROPOUT
-    model.add(Dropout(0.1))
+    model.add(Dropout(0.5))
     #9th layer : Dense
     model.add(Dense(1024, activation = 'relu'))
+    #DROPOUT
+    model.add(Dropout(0.5))
     #10th layer: Dense
     model.add(Dense(512, activation = 'relu'))
     #The final output only has 2 coordinates
     model.add(Dense(2))
     model.summary()
     model.compile(loss= 'mse', optimizer = 'adam', metrics = ['mse'])
-    #   
+    #
     history = model.fit(training_x, training_y,
           batch_size = batch_size,
           epochs = epochs,
@@ -237,24 +267,23 @@ def train_network(filled_accumulators, training_normals):
           validation_data = (test_x, test_y))
     score = model.evaluate(test_x, test_y, verbose = 0)
     print('Test loss:', score[0])
-    print('Test accuracy:', score[1])
-    model.save("accu_model.h5")
-    #predict 
+    model.save("accu_model_after_reorientation.h5")
+    #predict
     predictions = model.predict(test_x, batch_size = batch_size)
     for i in range(5):
         rand = random.randint(0, 199)
         print("Number:", i)
         print("True: ", test_y[rand])
-        print("Prediction: ", predictions[rand])    
-    return model 
+        print("Prediction: ", predictions[rand])
+    return model
 
 #Main
 def main():
     #Set up
-    random.seed(0)
+    #random.seed(0)
     np.set_printoptions(threshold = sys.maxsize)
     #Proprocess
-    preprocess() 
+    preprocess()
     # Create copies of meshs
     Mesh_copy = copy.deepcopy(Mesh)
     # Colour in meshes
@@ -269,26 +298,28 @@ def main():
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     print("Filling accumulators...")
     accumulator_filled = hough_transform(Mesh_copy)
-    accumulator_filled.dump("accumulator_filled.dat")
+    #accumulator_filled.dump("accumulator_filled_after_reorientation.dat")
     #accumulator_filled = np.load("accumulator_filled.dat")
-    
-    
+
+
     #OPTIONAL display an image
     the_chosen = 0
-    display_red = True 
+    display_red = True
     show_this = display_accumulator(accumulator_filled, the_chosen, display_red)
     imshow(show_this)
     #STEP 3 Train the network
-    training_vertex_normals = Mesh_copy.normals    
+    training_vertex_normals = Mesh_copy.normals
+    referencePoint = [0,0,1]
     for i in range(len(training_vertex_normals)):
         training_vertex_normals[i] = normalize(training_vertex_normals[i])
+        if(np.dot(referencePoint, training_vertex_normals[i]) < 0):
+            training_vertex_normals[i] *= -1
     #Begin training
     print("Training network...")
-    train_network(accumulator_filled, training_vertex_normals)
+    #train_network(accumulator_filled, training_vertex_normals)
     #model = load_model("accu_model.h5")
     #validation method
-    humanahumanunsdjlnwbkjvsdlvsbndl
-    
+
 #Begins the program by running Main method
 if __name__ == '__main__':
     main()
