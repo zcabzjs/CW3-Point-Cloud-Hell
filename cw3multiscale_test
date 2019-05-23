@@ -125,10 +125,10 @@ def hough_transform(this_mesh):
     #Compute number of triplets to be made (equation 4 from paper)
     numberOfTriplets = math.ceil((1/(2*(epsilon**2)))*math.log((2*size_M*size_M)/(1-confidence_interval)))
     #Make 3D matrix
-    accumulator = np.zeros((numberOfPoints, len(neighbourhood_sizes), size_M, size_M))
-    vote_normals = np.zeros((numberOfPoints, len(neighbourhood_sizes), 3))
+    accumulator = np.zeros((numberOfPoints,size_M, size_M, len(neighbourhood_sizes)))
+    vote_normals = np.zeros((numberOfPoints,len(neighbourhood_sizes), 3))
     #search the point cloud
-    for this_point in range(5):
+    for this_point in range(len(Mesh_pointArray)):
         print(this_point+1)
         #Initializing the matrices for PCA (different for each point)
         pca_2d = np.zeros([3,3])
@@ -194,16 +194,15 @@ def hough_transform(this_mesh):
                 if (normals[this_normal][1] >= 1):
                     y_comp = size_M - 1
                 #add vote
-                accumulator[int(this_point)][neighbourhood_size_index][int(x_comp)][int(y_comp)] += 1
+                accumulator[int(this_point)][int(x_comp)][int(y_comp)][neighbourhood_size_index] += 1
                 #add normals
                 vote_normal_accumulator[int(x_comp)][int(y_comp)] += normals[this_normal]
-                if(accumulator[int(this_point)][neighbourhood_size_index][int(x_comp)][int(y_comp)] > max_vote_number):
-                    max_vote_number = accumulator[int(this_point)][neighbourhood_size_index][int(x_comp)][int(y_comp)]
+                if(accumulator[int(this_point)][int(x_comp)][int(y_comp)][neighbourhood_size_index] > max_vote_number):
+                    max_vote_number = accumulator[int(this_point)][int(x_comp)][int(y_comp)][neighbourhood_size_index]
                     x_comp_ofmax = x_comp
                     y_comp_ofmax = y_comp
-            mean_normal = vote_normal_accumulator[int(x_comp_ofmax)][int(y_comp_ofmax)]/accumulator[int(this_point)][neighbourhood_size_index][int(x_comp_ofmax)][int(y_comp_ofmax)]
+            mean_normal = vote_normal_accumulator[int(x_comp_ofmax)][int(y_comp_ofmax)]/accumulator[int(this_point)][int(x_comp_ofmax)][int(y_comp_ofmax)][neighbourhood_size_index]
             vote_normals[int(this_point)][neighbourhood_size_index] = mean_normal
-            #print("Accumulator:", accumulator[int(this_point)][neighbourhood_size_index])
     return accumulator
 
 #Method for displaying an accumulator
@@ -236,9 +235,9 @@ def train_network(filled_accumulators, training_normals):
     #print(test_x[0])
     #print(test_y[0])
     #Reshape data
-    training_x = training_x.reshape(training_x.shape[0], len(neighbourhood_sizes), img_x, img_y, 1)
-    test_x = test_x.reshape(test_x.shape[0], len(neighbourhood_sizes), img_x, img_y, 1)
-    input_shape = (img_x, img_y, 1)
+    training_x = training_x.reshape(training_x.shape[0], img_x, img_y, len(neighbourhood_sizes))
+    test_x = test_x.reshape(test_x.shape[0], img_x, img_y, len(neighbourhood_sizes))
+    input_shape = (img_x, img_y, len(neighbourhood_sizes))
     #initialize model
     model = Sequential()
     #1st layer : Conv
@@ -328,7 +327,7 @@ def main():
             training_vertex_normals[i] *= -1
     #Begin training
     print("Training network...")
-    train_network(accumulator_filled, training_vertex_normals)
+    #train_network(accumulator_filled, training_vertex_normals)
     #model = load_model("accu_model.h5")
     #validation method
 
