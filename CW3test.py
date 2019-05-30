@@ -45,7 +45,7 @@ def preprocess():
     batch_size = 128
     #the number of iterations the network trains for
     global epochs
-    epochs = 25
+    epochs = 5
     ###############################################
     #Read in data
     print("Preprocessing...")
@@ -53,9 +53,9 @@ def preprocess():
     global Mesh
     #Load Mesh
     #Bunny:
-    Mesh = readPointCloud("dragon.ply")
+    Mesh = readPointCloud("bunny.ply")
     global run_PCA
-    run_PCA = True
+    run_PCA = False
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -116,7 +116,7 @@ def hough_transform(this_mesh):
     accumulator = np.zeros((numberOfPoints, size_M, size_M))
     vote_normals = np.zeros((numberOfPoints, 3))
     #search the point cloud
-    for this_point in range(len(indices)):
+    for this_point in range(100):
         print(this_point+1)
         #store
         triplets = []
@@ -192,6 +192,7 @@ def hough_transform(this_mesh):
                 y_comp_ofmax = y_comp
         mean_normal = vote_normal_accumulator[int(x_comp_ofmax)][int(y_comp_ofmax)]/accumulator[int(this_point)][int(x_comp_ofmax)][int(y_comp_ofmax)]
         vote_normals[int(this_point)] = mean_normal
+        #print("Accumulator: ", accumulator[int(this_point)])
     return accumulator
 
 #Method for displaying an accumulator
@@ -267,7 +268,7 @@ def train_network(filled_accumulators, training_normals):
           validation_data = (test_x, test_y))
     score = model.evaluate(test_x, test_y, verbose = 0)
     print('Test loss:', score[0])
-    model.save("accu_model_after_reorientation.h5")
+    model.save("bunny_accu_model_with_PCA.h5")
     #predict
     predictions = model.predict(test_x, batch_size = batch_size)
     for i in range(5):
@@ -277,10 +278,19 @@ def train_network(filled_accumulators, training_normals):
         print("Prediction: ", predictions[rand])
     return model
 
+def validate(model, accumulators, normals):
+    accumulators.reshape(accumulators.shape[0], 33, 33, 1)
+    predictions = model.predict(accumulators, batch_size = batch_size)
+    for i in range(10):
+        rand = random.randint(0, 19)
+        print("Number:", i)
+        print("True: ", normals[rand])
+        print("Prediction: ", predictions[rand])
+
 #Main
 def main():
     #Set up
-    #random.seed(0)
+    random.seed(0)
     np.set_printoptions(threshold = sys.maxsize)
     #Proprocess
     preprocess()
@@ -298,7 +308,11 @@ def main():
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     print("Filling accumulators...")
     accumulator_filled = hough_transform(Mesh_copy)
-    #accumulator_filled.dump("accumulator_filled_after_reorientation.dat")
+    print("Accumulator 2", accumulator_filled[1])
+    np.savez_compressed('bunny_accumulator_compressed', bunny=accumulator_filled)
+    loaded_accumulators = np.load('bunny_accumulator_compressed.npz')
+    print("Verify if it is correct", loaded_accumulators['bunny'][1])
+    #accumulator_filled.dump("bunny_accumulator_with_PCA.dat")
     #accumulator_filled = np.load("accumulator_filled.dat")
 
 
@@ -317,8 +331,9 @@ def main():
     #Begin training
     print("Training network...")
     #train_network(accumulator_filled, training_vertex_normals)
-    #model = load_model("accu_model.h5")
+    #model = load_model("accu_model_after_reorientation.h5")
     #validation method
+    validate(model, accumulator_filled[:20], np.delete(Mesh_copy.normals[:20],2,1))
 
 #Begins the program by running Main method
 if __name__ == '__main__':
