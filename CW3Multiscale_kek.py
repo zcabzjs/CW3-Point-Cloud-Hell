@@ -45,7 +45,7 @@ def preprocess():
     batch_size = 128
     #the number of iterations the network trains for
     global epochs
-    epochs = 25
+    epochs = 10
     ###############################################
     #Read in data
     print("Preprocessing...")
@@ -288,14 +288,34 @@ def train_network(filled_accumulators, training_normals):
     return model, test_x, test_y
 
 #Predict for some test obejcts
-def predict_this(model, test_x, test_y):
+def predict_this(model, test_x, test_y, validation_normals, PCA_matrices):
     predictions = model.predict(test_x, batch_size = batch_size)
     output_predictions = []
     for i in range(len(test_x)):
         print("Number:", i)
         print("True: ", test_y[i])
+        z_square = 1 - test_y[i][0] * test_y[i][0] - test_y[i][1] * test_y[i][1]
+        v1 = np.zeros(3)
+        if(z_square < 0):
+            v1 = [test_y[i][0], test_y[i][1], 0]
+            v1 = normalize(v1)
+        else:
+            v1 = [test_y[i][0],  test_y[i][1], math.sqrt(z_square)]
+        v1 = np.dot(np.linalg.inv(PCA_matrices[i]), v1)
+        print("Validation normal:", validation_normals[i])
+        print("Calculated normal:", v1)
         print("Prediction: ", predictions[i])
+        z_square = 1 - predictions[i][0] * predictions[i][0] - predictions[i][1] * predictions[i][1]
+        v2 = np.zeros(3)
+        if(z_square < 0):
+            v2 = [predictions[i][0], predictions[i][1], 0]
+            v2 = normalize(v2)
+        else:
+            v2 = [predictions[i][0],  predictions[i][1], math.sqrt(z_square)]
+        v2 = np.dot(np.linalg.inv(PCA_matrices[i]), v2)
+        print("Predicted normal:", v2)
         print("Squared error: ", np.linalg.norm(np.square(test_y[i]-predictions[i])))
+        print("Squared vector error:", np.linalg.norm(np.square(v1-v2)))
         output_predictions.append(predictions[i])
     return output_predictions
 
@@ -318,11 +338,11 @@ def main():
     #Mesh_copy = pca_3d(Mesh_copy)
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     print("Filling accumulators...")
-    accumulator_filled, PCA_matrices = hough_transform(Mesh_copy)
-    #np.savez_compressed('dragon_PCA_multi', accum=accumulator_filled, pca=PCA_matrices)
-    #loaded_accumulators = np.load('dragon_PCA_multi.npz')
-    #accumulator_filled = loaded_accumulators['accum']
-    #PCA_matrices = loaded_accumulators['pca']
+    #accumulator_filled, PCA_matrices = hough_transform(Mesh_copy)
+    #np.savez_compressed('bunny_PCA_multi', accum=accumulator_filled, pca=PCA_matrices)
+    loaded_accumulators = np.load('bunny_PCA_multi.npz')
+    accumulator_filled = loaded_accumulators['accum']
+    PCA_matrices = loaded_accumulators['pca']
     #OPTIONAL display an image
     #the_chosen = 1
     #display_red = True
@@ -332,9 +352,12 @@ def main():
     #STEP 3 Train the network
     #Get normals
     training_vertex_normals = Mesh_copy.normals
+    validation_normals = Mesh.normals
     if(run_PCA):
         for i in range(len(training_vertex_normals)):
-            training_vertex_normals[i]=np.dot(PCA_matrices[i], training_vertex_normals[i])
+            training_vertex_normals[i] = normalize(training_vertex_normals[i])
+            validation_normals[i] = normalize(validation_normals[i])
+            training_vertex_normals[i]= np.dot(PCA_matrices[i], training_vertex_normals[i])
     #To check whether we should reorientate
     referencePoint = [0,0,1]
     #For each normal in the model
@@ -347,16 +370,18 @@ def main():
             training_vertex_normals[i] *= -1
     #Begin training
     print("Training network...")
+    print("Number of accumulators:", len(accumulator_filled))
+    print("Number of training normals:", len(training_vertex_normals))
     #model, test_x, test_y = train_network(accumulator_filled, training_vertex_normals)
     #load
     model = load_model("dragon_PCA_multi.h5")
     #model = load_model("accu_model_after_reorientation.h5")
-    test_x = accumulator_filled[:100]
-    test_y = np.delete(training_vertex_normals[:100], 2, 1)
+    test_x = accumulator_filled
+    test_y = np.delete(training_vertex_normals, 2, 1)
     test_x = test_x.reshape(test_x.shape[0], size_M, size_M, len(neighbourhood_sizes))
     #show original
     draw([Mesh_copy])
-    output_predictions = predict_this(model, test_x, test_y)
+    output_predictions = predict_this(model, test_x, test_y, validation_normals, PCA_matrices)
     #present normals
     print("")
     output_predictions_w_z = []
@@ -374,13 +399,12 @@ def main():
             z = math.sqrt(z_square)
             output_predictions_w_z.append([this_prediction[0], this_prediction[1], z])
         if(run_PCA):
-            for i in range(len(output_predictions_w_z)):
-                inv = np.linalg.inv(PCA_matrices[i])
-                output_predictions_w_z[i] = np.dot(inv, output_predictions_w_z[i])
-                output_predictions_w_z[i] = normalize(output_predictions_w_z[i])
-                print("Real normal", Mesh_copy.normals[i])
-                print("Predicted normal after PCA inversion", output_predictions_w_z[i])
-                print("MSE difference", np.linalg.norm(np.square(Mesh_copy.normals[i]-output_predictions_w_z[i])))
+            print("Point:", i)
+            inv = np.linalg.inv(PCA_matrices[i])
+            output_predictions_w_z[i] = np.dot(inv, output_predictions_w_z[i])
+            output_predictions_w_z[i] = normalize(output_predictions_w_z[i])
+            #print("Predicted normal after PCA inversion", output_predictions_w_z[i])
+            #print("MSE difference", np.linalg.norm(np.square(Mesh_copy.normals[i]-output_predictions_w_z[i])))
     #put predicted
     Mesh_prediction = copy.deepcopy(Mesh_copy)
     Mesh_prediction.paint_uniform_color([192/255, 192/255, 192/255])
