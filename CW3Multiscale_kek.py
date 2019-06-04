@@ -55,13 +55,12 @@ def preprocess():
     #Bunny:
     Mesh = readPointCloud("bunny.ply")
     global run_PCA
-    run_PCA = False
-    scale_number = 3
+    run_PCA = True
+    scale_number = 1
     global neighbourhood_sizes
     neighbourhood_sizes= [neighbourhood_size]
     if scale_number == 3:
         neighbourhood_sizes = [neighbourhood_size, math.floor(neighbourhood_size/2), math.floor(neighbourhood_size*2)]
-
 
 #Convert Open3d Point Cloud to Numpy Array
 def convert_PC2NA(mesh_as_PC):
@@ -110,6 +109,7 @@ def hough_transform(this_mesh):
     #Convert into narray
     Mesh_pointArray = convert_PC2NA(this_mesh)
     numberOfPoints = len(Mesh_pointArray)
+    PCA_matrices = np.zeros([numberOfPoints,3,3])
     #Produce PointCloud
     Mesh_pointCloud = Vector3dVector(Mesh_pointArray)
     neighbourhood_distances = []
@@ -128,7 +128,7 @@ def hough_transform(this_mesh):
     accumulator = np.zeros((numberOfPoints,size_M, size_M, len(neighbourhood_sizes)))
     vote_normals = np.zeros((numberOfPoints,len(neighbourhood_sizes), 3))
     #search the point cloud
-    for this_point in range(len(Mesh_pointArray)):
+    for this_point in range(numberOfPoints):
         print(this_point+1)
         #Initializing the matrices for PCA (different for each point)
         pca_2d = np.zeros([3,3])
@@ -176,6 +176,8 @@ def hough_transform(this_mesh):
             if(neighbourhood_size_index == 0):
                 if(run_PCA):
                     pca_2d = pca_2d_adjustment_matrix(normals)
+                    PCA_for_this_point = np.dot(pca_2d, pca_3d)
+                    PCA_matrices[this_point] = PCA_for_this_point
             for this_normal in range(len(normals)):
                 if(run_PCA):
                     normals[this_normal] = np.dot(pca_2d, normals[this_normal])
@@ -203,7 +205,7 @@ def hough_transform(this_mesh):
                     y_comp_ofmax = y_comp
             mean_normal = vote_normal_accumulator[int(x_comp_ofmax)][int(y_comp_ofmax)]/accumulator[int(this_point)][int(x_comp_ofmax)][int(y_comp_ofmax)][neighbourhood_size_index]
             vote_normals[int(this_point)][neighbourhood_size_index] = mean_normal
-    return accumulator
+    return accumulator, PCA_matrices
 
 #Method for displaying an accumulator
 def display_accumulator(accumulator_set, this_accumulator, display_red):
@@ -229,7 +231,7 @@ def train_network(filled_accumulators, training_normals):
     #Only have n_x and n_y
     training_normals = np.delete(training_normals, 2, 1)
     #Split the data
-    training_x, test_x, training_y, test_y = tts(filled_accumulators, training_normals, test_size = 0.2)
+    training_x, test_x, training_y, test_y = tts(filled_accumulators, training_normals, test_size = 0.25)
     #print(training_x[0])
     #print(training_y[0])
     #print(test_x[0])
@@ -270,7 +272,7 @@ def train_network(filled_accumulators, training_normals):
     model.add(Dense(2))
     model.summary()
     model.compile(loss= 'mse', optimizer = 'adam', metrics = ['mse'])
-    #fit the model  
+    #fit the model
     history = model.fit(training_x, training_y,
           batch_size = batch_size,
           epochs = epochs,
@@ -280,11 +282,11 @@ def train_network(filled_accumulators, training_normals):
     score = model.evaluate(test_x, test_y, verbose = 0)
     #return loss
     print('Test loss:', score[0])
-    #save model 
-    model.save("accumulator_filled_after_reorientation_WHERB_Bunny.h5")
+    #save model
+    model.save("bunny_PCA_multi3.h5")
     return model, test_x, test_y
 
-#Predict for some test obejcts 
+#Predict for some test obejcts
 def predict_this(model, test_x, test_y):
     predictions = model.predict(test_x, batch_size = batch_size)
     output_predictions = []
@@ -292,6 +294,7 @@ def predict_this(model, test_x, test_y):
         print("Number:", i)
         print("True: ", test_y[i])
         print("Prediction: ", predictions[i])
+        print("Squared error: ", np.linalg.norm(np.square(test_y[i]-predictions[i])))
         output_predictions.append(predictions[i])
     return output_predictions
 
@@ -314,9 +317,10 @@ def main():
     #Mesh_copy = pca_3d(Mesh_copy)
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     print("Filling accumulators...")
-    accumulator_filled = hough_transform(Mesh_copy)
-    accumulator_filled.dump("accumulator_filled_without_PCA_with_multiscale_Bunny.dat")
-    accumulator_filled = np.load("accumulator_filled_without_PCA_with_multiscale_Bunny.dat")
+    accumulator_filled, PCA_matrices = hough_transform(Mesh_copy)
+    np.savez_compressed('bunny_PCA_multi3', accum=accumulator_filled)
+    loaded_accumulators = np.load('bunny_PCA_multi3.npz')
+    accumulator_filled = loaded_accumulators['accum']
     #OPTIONAL display an image
     the_chosen = 0
     display_red = True
@@ -325,11 +329,14 @@ def main():
     #STEP 3 Train the network
     #Get normals
     training_vertex_normals = Mesh_copy.normals
+    if(run_PCA):
+        for i in range(len(training_vertex_normals)):
+            training_vertex_normals[i]=np.dot(PCA_matrices[i], training_vertex_normals[i])
     #To check whether we should reorientate
     referencePoint = [0,0,1]
-    #For each normal in the model 
+    #For each normal in the model
     for i in range(len(training_vertex_normals)):
-        #normalize the norm 
+        #normalize the norm
         training_vertex_normals[i] = normalize(training_vertex_normals[i])
         #If the z component is negative
         if(np.dot(referencePoint, training_vertex_normals[i]) < 0):
@@ -339,12 +346,12 @@ def main():
     print("Training network...")
     #model, test_x, test_y = train_network(accumulator_filled, training_vertex_normals)
     #load
-    #model = load_model("accumulator_filled_after_reorientation_WHERB_Bunny.h5")
-    model = load_model("accu_model_after_reorientation.h5")
+    model = load_model("dragon_accumulator_noPCA_multi.h5")
+    #model = load_model("accu_model_after_reorientation.h5")
     test_x = accumulator_filled
-    test_y = training_vertex_normals
+    test_y = np.delete(training_vertex_normals, 2, 1)
     test_x = test_x.reshape(test_x.shape[0], size_M, size_M, len(neighbourhood_sizes))
-    output_predictions = predict_this(model, test_x, test_y)    
+    output_predictions = predict_this(model, test_x, test_y)
     #present normals
     print("")
     output_predictions_w_z = []
@@ -353,31 +360,37 @@ def main():
         x_square = this_prediction[0] * this_prediction[0]
         y_square = this_prediction[1] * this_prediction[1]
         z_square = -x_square - y_square + 1
-        #To negate from CNN    
+        #To negate from CNN
         if (z_square < 0):
-            output_predictions_w_z.append([0, 0, 0])
-        else: 
+            v = [this_prediction[0], this_prediction[1], 0]
+            v = normalize(v)
+            output_predictions_w_z.append(v)
+        else:
             z = math.sqrt(z_square)
             output_predictions_w_z.append([this_prediction[0], this_prediction[1], z])
-    #put predicted 
+        if(run_PCA):
+            for i in range(len(output_predictions_w_z)):
+                inv = np.linalg.inv(PCA_matrices[i])
+                output_predictions_w_z[i] = np.dot(inv, output_predictions_w_z[i])
+    #put predicted
     Mesh_prediction = copy.deepcopy(Mesh_copy)
     Mesh_prediction.paint_uniform_color([192/255, 192/255, 192/255])
     #show original
     draw([Mesh_copy])
-    #put new normals 
+    #put new normals
     print(type(Mesh_copy.normals))
     output_predictions_w_z = np.asarray(output_predictions_w_z)
     output_predictions_w_z = Vector3dVector(output_predictions_w_z)
     print(type(output_predictions_w_z))
     Mesh_prediction.normals = output_predictions_w_z
     draw([Mesh_prediction])
-    
+
     #Mesh_prediction.normals = output_predictions_w_z
     #draw
-    
-    
-    
-    
+
+
+
+
 
 
 #Begins the program by running Main method
