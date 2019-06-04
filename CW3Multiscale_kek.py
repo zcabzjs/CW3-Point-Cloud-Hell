@@ -53,7 +53,7 @@ def preprocess():
     global Mesh
     #Load Mesh
     #Bunny:
-    Mesh = readPointCloud("dragon.ply")
+    Mesh = readPointCloud("bunny.ply")
     #Implement PCA
     global run_PCA
     run_PCA = True
@@ -319,10 +319,10 @@ def main():
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     print("Filling accumulators...")
     accumulator_filled, PCA_matrices = hough_transform(Mesh_copy)
-    np.savez_compressed('dragon_PCA_multi', accum=accumulator_filled, pca=PCA_matrices)
-    loaded_accumulators = np.load('dragon_PCA_multi.npz')
-    accumulator_filled = loaded_accumulators['accum']
-    PCA_matrices = loaded_accumulators['pca']
+    #np.savez_compressed('dragon_PCA_multi', accum=accumulator_filled, pca=PCA_matrices)
+    #loaded_accumulators = np.load('dragon_PCA_multi.npz')
+    #accumulator_filled = loaded_accumulators['accum']
+    #PCA_matrices = loaded_accumulators['pca']
     #OPTIONAL display an image
     #the_chosen = 1
     #display_red = True
@@ -347,9 +347,9 @@ def main():
             training_vertex_normals[i] *= -1
     #Begin training
     print("Training network...")
-    model, test_x, test_y = train_network(accumulator_filled, training_vertex_normals)
+    #model, test_x, test_y = train_network(accumulator_filled, training_vertex_normals)
     #load
-    model = load_model("dragon_accumulator_noPCA_multi.h5")
+    model = load_model("dragon_PCA_multi.h5")
     #model = load_model("accu_model_after_reorientation.h5")
     test_x = accumulator_filled[:100]
     test_y = np.delete(training_vertex_normals[:100], 2, 1)
@@ -377,6 +377,10 @@ def main():
             for i in range(len(output_predictions_w_z)):
                 inv = np.linalg.inv(PCA_matrices[i])
                 output_predictions_w_z[i] = np.dot(inv, output_predictions_w_z[i])
+                output_predictions_w_z[i] = normalize(output_predictions_w_z[i])
+                print("Real normal", Mesh_copy.normals[i])
+                print("Predicted normal after PCA inversion", output_predictions_w_z[i])
+                print("MSE difference", np.linalg.norm(np.square(Mesh_copy.normals[i]-output_predictions_w_z[i])))
     #put predicted
     Mesh_prediction = copy.deepcopy(Mesh_copy)
     Mesh_prediction.paint_uniform_color([192/255, 192/255, 192/255])
