@@ -53,12 +53,13 @@ def preprocess():
     global Mesh
     #Load Mesh
     #Bunny:
-    Mesh = readPointCloud("bunny.ply")
+    Mesh = readPointCloud("dragon.ply")
+    #Implement PCA
     global run_PCA
     run_PCA = True
     scale_number = 1
     global neighbourhood_sizes
-    neighbourhood_sizes= [neighbourhood_size]
+    neighbourhood_sizes = [neighbourhood_size]
     if scale_number == 3:
         neighbourhood_sizes = [neighbourhood_size, math.floor(neighbourhood_size/2), math.floor(neighbourhood_size*2)]
 
@@ -82,7 +83,7 @@ def normalize(this_n):
 
 def pca_3d_adjustment_matrix(this_neighbourhood):
     cov = np.zeros([3,3])
-    mean = np.mean(this_neighbourhood, axis=0)
+    mean = np.mean(this_neighbourhood, axis = 0)
     for neighbour in this_neighbourhood:
         v = neighbour - mean
         cov += np.outer(v,v)
@@ -125,7 +126,7 @@ def hough_transform(this_mesh):
     #Compute number of triplets to be made (equation 4 from paper)
     numberOfTriplets = math.ceil((1/(2*(epsilon**2)))*math.log((2*size_M*size_M)/(1-confidence_interval)))
     #Make 3D matrix
-    accumulator = np.zeros((numberOfPoints,size_M, size_M, len(neighbourhood_sizes)))
+    accumulator = np.zeros((numberOfPoints, size_M, size_M, len(neighbourhood_sizes)))
     vote_normals = np.zeros((numberOfPoints,len(neighbourhood_sizes), 3))
     #search the point cloud
     for this_point in range(numberOfPoints):
@@ -283,7 +284,7 @@ def train_network(filled_accumulators, training_normals):
     #return loss
     print('Test loss:', score[0])
     #save model
-    model.save("bunny_PCA_multi3.h5")
+    model.save("dragon_PCA_multi.h5")
     return model, test_x, test_y
 
 #Predict for some test obejcts
@@ -318,13 +319,15 @@ def main():
     #STEP 2, using a Hough transformation, convert PointCloud to filled accumulator (i.e. a 2D array)
     print("Filling accumulators...")
     accumulator_filled, PCA_matrices = hough_transform(Mesh_copy)
-    np.savez_compressed('bunny_PCA_multi3', accum=accumulator_filled)
-    loaded_accumulators = np.load('bunny_PCA_multi3.npz')
+    np.savez_compressed('dragon_PCA_multi', accum=accumulator_filled, pca=PCA_matrices)
+    loaded_accumulators = np.load('dragon_PCA_multi.npz')
     accumulator_filled = loaded_accumulators['accum']
+    PCA_matrices = loaded_accumulators['pca']
     #OPTIONAL display an image
-    the_chosen = 0
-    display_red = True
-    #show_this = display_accumulator(accumulator_filled, the_chosen, display_red)
+    #the_chosen = 1
+    #display_red = True
+    #accumulator_filled_temp = accumulator_filled[:, :, :, 1]
+    #show_this = display_accumulator(accumulator_filled_temp, the_chosen, display_red)
     #imshow(show_this)
     #STEP 3 Train the network
     #Get normals
@@ -344,13 +347,15 @@ def main():
             training_vertex_normals[i] *= -1
     #Begin training
     print("Training network...")
-    #model, test_x, test_y = train_network(accumulator_filled, training_vertex_normals)
+    model, test_x, test_y = train_network(accumulator_filled, training_vertex_normals)
     #load
     model = load_model("dragon_accumulator_noPCA_multi.h5")
     #model = load_model("accu_model_after_reorientation.h5")
-    test_x = accumulator_filled
-    test_y = np.delete(training_vertex_normals, 2, 1)
+    test_x = accumulator_filled[:100]
+    test_y = np.delete(training_vertex_normals[:100], 2, 1)
     test_x = test_x.reshape(test_x.shape[0], size_M, size_M, len(neighbourhood_sizes))
+    #show original
+    draw([Mesh_copy])
     output_predictions = predict_this(model, test_x, test_y)
     #present normals
     print("")
@@ -375,23 +380,25 @@ def main():
     #put predicted
     Mesh_prediction = copy.deepcopy(Mesh_copy)
     Mesh_prediction.paint_uniform_color([192/255, 192/255, 192/255])
-    #show original
-    draw([Mesh_copy])
-    #put new normals
-    print(type(Mesh_copy.normals))
     output_predictions_w_z = np.asarray(output_predictions_w_z)
     output_predictions_w_z = Vector3dVector(output_predictions_w_z)
-    print(type(output_predictions_w_z))
     Mesh_prediction.normals = output_predictions_w_z
     draw([Mesh_prediction])
-
-    #Mesh_prediction.normals = output_predictions_w_z
-    #draw
-
-
-
-
-
+    #Angle adjustment
+    angle_adjusts = []
+    for this_normal in range(len(Mesh_copy.normals)):
+        #print(output_predictions_w_z[3484])
+        normal_prediction = output_predictions_w_z[this_normal]
+        #print(Mesh_copy.normals[3484])
+        normal_true = Mesh_copy.normals[this_normal]
+        #compute arccos of dot product between prediction and true normals
+        #A good example should be close to 1
+        this_angle = np.arccos(np.dot(normal_true, normal_prediction))
+        #Store in dataset
+        angle_adjusts.append(this_angle)
+    print(angle_adjusts)
+    #write
+    writePointCloud("Output_Mesh.ply", Mesh_prediction)
 
 #Begins the program by running Main method
 if __name__ == '__main__':
